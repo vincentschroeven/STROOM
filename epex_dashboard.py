@@ -145,7 +145,7 @@ def morgen_sectie(mo, morgen_str):
         <span><span class="dot" style="background:#1baf7a"></span>Goedkoop</span>
         <span><span class="dot" style="background:#c3c2b7"></span>Normaal</span>
         <span><span class="dot" style="background:#e34948"></span>Duur</span>
-        <span><span class="dot" style="background:#f59e0b"></span>Vast ~25 c€</span>
+        <span><span class="dot" style="background:#f59e0b"></span>Vast ~17.9 c€</span>
       </div>
       <div style="position:relative;height:180px"><canvas id="chart-mo"></canvas></div>
     </div>
@@ -245,7 +245,7 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, gegenereerd_op, huidig_kwarti
         <span><span class="dot" style="background:#1baf7a"></span>Goedkoop</span>
         <span><span class="dot" style="background:#c3c2b7"></span>Normaal</span>
         <span><span class="dot" style="background:#e34948"></span>Duur</span>
-        <span><span class="dot" style="background:#f59e0b"></span>Vast ~25 c€</span>
+        <span><span class="dot" style="background:#f59e0b"></span>Vast ~17.9 c€</span>
       </div>
       <div style="position:relative;height:180px"><canvas id="chart-vd"></canvas></div>
     </div>
@@ -258,7 +258,7 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, gegenereerd_op, huidig_kwarti
 </div>
 <div class="footer">Indicatieve eindprijs = (1,04 × EPEX + 0,50) × 1,06 btw · Nettarieven niet inbegrepen · Bron: ENTSO-E</div>
 <script>
-const REFERENTIE = 25;
+const REFERENTIE = 17.9;
 function maakChart(id, labels, data, kleuren) {{
   new Chart(document.getElementById(id), {{
     type: 'bar',
@@ -271,7 +271,7 @@ function maakChart(id, labels, data, kleuren) {{
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ display: false }}, tooltip: {{ callbacks: {{ label: ctx => ctx.datasetIndex === 0 ? ctx.parsed.y.toFixed(2) + ' c€/kWh' : 'Vast tarief: 25 c€/kWh' }} }} }},
+      plugins: {{ legend: {{ display: false }}, tooltip: {{ callbacks: {{ label: ctx => ctx.datasetIndex === 0 ? ctx.parsed.y.toFixed(2) + ' c€/kWh' : 'Vast tarief: 17.9 c€/kWh' }} }} }},
       scales: {{
         x: {{ ticks: {{ maxRotation: 0, maxTicksLimit: 12, color: '#898781', font: {{ size: 9 }} }}, grid: {{ display: false }} }},
         y: {{ ticks: {{ color: '#898781', font: {{ size: 10 }}, callback: v => v.toFixed(0) + ' c€' }}, grid: {{ color: '#e8e7e3' }} }}
