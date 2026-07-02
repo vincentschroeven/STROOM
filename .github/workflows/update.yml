@@ -1,0 +1,33 @@
+name: Update Stroomtip
+
+on:
+  schedule:
+    - cron: '30 11 * * *'  # 13:30 Belgische tijd (UTC+2)
+  workflow_dispatch:  # ook manueel te starten
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Python instellen
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Packages installeren
+        run: pip install requests python-dotenv
+
+      - name: Dashboard genereren
+        env:
+          ENTSOE_TOKEN: ${{ secrets.ENTSOE_TOKEN }}
+        run: python3 epex_dashboard.py
+
+      - name: Pushen naar GitHub
+        run: |
+          git config user.email "action@github.com"
+          git config user.name "GitHub Action"
+          git add index.html
+          git diff --cached --quiet || git commit -m "stroomtip update $(date '+%Y-%m-%d %H:%M')"
+          git push
