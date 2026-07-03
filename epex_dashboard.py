@@ -1,30 +1,55 @@
 #!/usr/bin/env python3
 """
-EPEX Belgium Stroomtip — HTML Dashboard Generator
-Gebruikt ENTSO-E API voor correcte Day-Ahead prijzen per kwartier.
+EPEX Belgium Stroomtip — genereert index.html met kwartierprijzen
+voor vandaag en morgen op basis van ENTSO-E Day-Ahead data.
+
+Draait dagelijks via GitHub Actions (.github/workflows/update.yml).
 """
 
 import json
 import os
+import sys
+import time
 import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
-from dotenv import load_dotenv
+from zoneinfo import ZoneInfo
 
-load_dotenv()
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # in GitHub Actions komt de token uit de environment
+
+# ========================== CONFIGURATIE ==========================
 ENTSOE_TOKEN = os.getenv("ENTSOE_TOKEN")
 
-FACTOR = 1.04
-OPSLAG = 0.50
-BTW    = 1.06
-CET    = timezone(timedelta(hours=2))
-AREA   = "10YBE----------2"
+# Energie.be dynamische formule: (1,04 x Belpex + 0,50) c€/kWh excl. btw
+FACTOR = 1.04     # vermenigvuldiger op EPEX
+OPSLAG = 0.50     # vaste opslag in c€/kWh
+BTW    = 1.06     # 6% btw
+
+GRENS_GOEDKOOP = 8.0    # c€/kWh — hieronder kleurt een kwartier groen
+GRENS_DUUR     = 17.9   # c€/kWh — hierboven kleurt een kwartier rood
+REFERENTIE     = 17.9   # c€/kWh — gele stippellijn (vast tarief)
+
+AANTAL_TIPS = 5         # aantal beste/duurste kwartieren in de lijstjes
+RETRIES     = 3         # pogingen bij API-fouten
+# ==================================================================
+
+BRUSSEL = ZoneInfo("Europe/Brussels")
+AREA    = "10YBE----------2"
+API_URL = "https://web-api.tp.entsoe.eu/api"
 
 OUTPUT_PATH = Path(__file__).parent / "index.html"
 
 
+# ---------------------- DATA OPHALEN ----------------------
+
 def fetch_prices(date: datetime) -> list:
+    """Haalt Day-Ahead prijzen op. Geeft [(label 'HH:MM', prijs €/MWh), ...].
+    Bij een API-fout: probeert opnieuw. Geeft [] terug als er geen data is."""
     start = date.strftime("%Y%m%d0000")
     end   = (date + timedelta(days=1)).strftime("%Y%m%d0000")
     params = {
@@ -35,12 +60,31 @@ def fetch_prices(date: datetime) -> list:
         "periodStart":   start,
         "periodEnd":     end,
     }
-    resp = requests.get("https://web-api.tp.entsoe.eu/api", params=params, timeout=30)
-    resp.raise_for_status()
-    root = ET.fromstring(resp.text)
+
+    laatste_fout = None
+    for poging in range(1, RETRIES + 1):
+        try:
+            resp = requests.get(API_URL, params=params, timeout=30)
+            if resp.status_code == 400:
+                # ENTSO-E geeft 400 als er (nog) geen data is voor die dag
+                return []
+            resp.raise_for_status()
+            return _parse_xml(resp.text)
+        except requests.RequestException as e:
+            laatste_fout = e
+            print(f"  Poging {poging}/{RETRIES} mislukt: {e}")
+            if poging < RETRIES:
+                time.sleep(10)
+
+    raise RuntimeError(f"ENTSO-E niet bereikbaar na {RETRIES} pogingen: {laatste_fout}")
+
+
+def _parse_xml(xml_text: str) -> list:
+    """Zet ENTSO-E XML om naar kwartierdata. Uurdata wordt uitgesplitst."""
+    root = ET.fromstring(xml_text)
     ns   = {"ns": "urn:iec62325.351:tc57wg16:451-3:publicationdocument:7:3"}
 
-    resultaat = []
+    punten = []
     for ts in root.findall(".//ns:TimeSeries", ns):
         period = ts.find("ns:Period", ns)
         if period is None:
@@ -51,130 +95,134 @@ def fetch_prices(date: datetime) -> list:
             continue
         base = datetime.fromisoformat(start_node.text.replace("Z", "+00:00"))
 
-        if resolution == "PT60M":
-            for point in period.findall("ns:Point", ns):
-                pos   = int(point.find("ns:position", ns).text)
-                price = float(point.find("ns:price.amount", ns).text)
-                dt    = (base + timedelta(hours=pos - 1)).astimezone(CET)
+        for point in period.findall("ns:Point", ns):
+            pos   = int(point.find("ns:position", ns).text)
+            price = float(point.find("ns:price.amount", ns).text)
+            if resolution == "PT60M":
+                dt = (base + timedelta(hours=pos - 1)).astimezone(BRUSSEL)
                 for q in range(4):
-                    qt = dt + timedelta(minutes=q * 15)
-                    resultaat.append((qt.strftime("%H:%M"), price))
-        elif resolution == "PT15M":
-            for point in period.findall("ns:Point", ns):
-                pos   = int(point.find("ns:position", ns).text)
-                price = float(point.find("ns:price.amount", ns).text)
-                dt    = (base + timedelta(minutes=(pos - 1) * 15)).astimezone(CET)
-                resultaat.append((dt.strftime("%H:%M"), price))
+                    label = (dt + timedelta(minutes=q * 15)).strftime("%H:%M")
+                    punten.append((label, price))
+            elif resolution == "PT15M":
+                dt = (base + timedelta(minutes=(pos - 1) * 15)).astimezone(BRUSSEL)
+                punten.append((dt.strftime("%H:%M"), price))
 
+    # dedupliceren (eerste waarde wint) en sorteren op tijd
     seen = {}
-    for label, price in resultaat:
-        if label not in seen:
-            seen[label] = price
-    return sorted(seen.items(), key=lambda x: x[0])
+    for label, price in punten:
+        seen.setdefault(label, price)
+    return sorted(seen.items())
 
 
-def epex_naar_eind(epex_mwh):
+# ---------------------- BEREKENINGEN ----------------------
+
+def epex_naar_eind(epex_mwh: float) -> float:
+    """€/MWh (EPEX) -> c€/kWh eindprijs incl. btw volgens Energie.be formule."""
     return round((FACTOR * (epex_mwh / 10) + OPSLAG) * BTW, 2)
 
 
-def bouw_dag_data(kwartieren, huidig_kwartier=None):
+def bouw_dag_data(kwartieren: list, huidig_kwartier: str = None) -> dict:
+    """Berekent alles wat de HTML nodig heeft voor één dag."""
+    if not kwartieren:
+        return {}
+
     labels = [k[0] for k in kwartieren]
     eind   = [epex_naar_eind(k[1]) for k in kwartieren]
     n      = len(eind)
-    if n == 0:
-        return {}
-
-    GRENS_GOEDKOOP = 8.0  # c€/kWh — onder deze grens = groen
 
     kleuren = []
     for i in range(n):
         if huidig_kwartier and labels[i] == huidig_kwartier:
-            kleuren.append('#2a78d6')
+            kleuren.append('#2a78d6')      # nu
         elif eind[i] < GRENS_GOEDKOOP:
-            kleuren.append('#1baf7a')
-        elif eind[i] >= 17.9:
-            kleuren.append('#e34948')
+            kleuren.append('#1baf7a')      # goedkoop
+        elif eind[i] >= GRENS_DUUR:
+            kleuren.append('#e34948')      # duur
         else:
-            kleuren.append('#c3c2b7')
+            kleuren.append('#c3c2b7')      # normaal
 
-    gem   = sum(eind) / n
-    min_p = min(eind); min_i = eind.index(min_p)
-    max_p = max(eind); max_i = eind.index(max_p)
-    top_goed   = sorted(range(n), key=lambda i: eind[i])[:5]
-    top_slecht = sorted(range(n), key=lambda i: eind[i], reverse=True)[:5]
-
+    volgorde = sorted(range(n), key=lambda i: eind[i])
     return {
-        "labels": labels, "eind": eind, "kleuren": kleuren,
-        "gem": gem,
-        "min_p": min_p, "min_label": labels[min_i],
-        "max_p": max_p, "max_label": labels[max_i],
-        "top_goed":   [(labels[i], eind[i]) for i in top_goed],
-        "top_slecht": [(labels[i], eind[i]) for i in top_slecht],
+        "labels":     labels,
+        "eind":       eind,
+        "kleuren":    kleuren,
+        "gem":        sum(eind) / n,
+        "min_p":      min(eind), "min_label": labels[eind.index(min(eind))],
+        "max_p":      max(eind), "max_label": labels[eind.index(max(eind))],
+        "top_goed":   [(labels[i], eind[i]) for i in volgorde[:AANTAL_TIPS]],
+        "top_slecht": [(labels[i], eind[i]) for i in volgorde[-AANTAL_TIPS:][::-1]],
     }
 
 
+# ---------------------- HTML ----------------------
+
 def tip_rijen(items, cls):
-    rows = ""
-    for lbl, p in items:
-        rows += f'<div class="tip-row"><span class="uur">{lbl}</span><span class="{cls}">{p:.2f} c€</span></div>'
-    return rows
+    return "".join(
+        f'<div class="tip-row"><span class="uur">{lbl}</span><span class="{cls}">{p:.2f} c€</span></div>'
+        for lbl, p in items
+    )
 
 
-def morgen_sectie(mo, morgen_str):
-    if not mo:
+def kpi_blok(d):
+    return f'''
+    <div class="kpis">
+      <div class="kpi goed"><div class="label">Goedkoopste</div><div class="val">{d["min_p"]:.2f} c€</div><div class="sub">{d["min_label"]}</div></div>
+      <div class="kpi"><div class="label">Gemiddelde</div><div class="val">{d["gem"]:.2f} c€</div><div class="sub">incl. btw</div></div>
+      <div class="kpi slecht"><div class="label">Duurste</div><div class="val">{d["max_p"]:.2f} c€</div><div class="sub">{d["max_label"]}</div></div>
+    </div>'''
+
+
+def legende(met_nu: bool):
+    nu = '<span><span class="dot" style="background:#2a78d6"></span>Nu</span>' if met_nu else ''
+    return f'''
+      <div class="legend">
+        {nu}
+        <span><span class="dot" style="background:#1baf7a"></span>&lt; {GRENS_GOEDKOOP:g} c€</span>
+        <span><span class="dot" style="background:#c3c2b7"></span>Normaal</span>
+        <span><span class="dot" style="background:#e34948"></span>&ge; {GRENS_DUUR:g} c€</span>
+        <span><span class="dot" style="background:#f59e0b"></span>Vast ~{REFERENTIE:g} c€</span>
+      </div>'''
+
+
+def dag_sectie(d, titel, datum_str, chart_id, nu_badge=""):
+    if not d:
         return f'''
   <div class="dag">
     <div class="dag-header">
-      <div><div class="dag-titel">Morgen</div><div class="dag-datum">{morgen_str}</div></div>
+      <div><div class="dag-titel">{titel}</div><div class="dag-datum">{datum_str}</div></div>
     </div>
-    <div class="geen-data">Prijzen voor morgen worden verwacht na 13:00.<br>Herlaad de pagina later.</div>
+    <div class="geen-data">Prijzen voor {titel.lower()} worden verwacht na 13:00.<br>Herlaad de pagina later.</div>
   </div>'''
 
     return f'''
   <div class="dag">
     <div class="dag-header">
-      <div><div class="dag-titel">Morgen</div><div class="dag-datum">{morgen_str}</div></div>
+      <div><div class="dag-titel">{titel}</div><div class="dag-datum">{datum_str}</div></div>
+      {nu_badge}
     </div>
-    <div class="kpis">
-      <div class="kpi goed"><div class="label">Goedkoopste</div><div class="val">{mo["min_p"]:.2f} c€</div><div class="sub">{mo["min_label"]}</div></div>
-      <div class="kpi"><div class="label">Gemiddelde</div><div class="val">{mo["gem"]:.2f} c€</div><div class="sub">incl. btw</div></div>
-      <div class="kpi slecht"><div class="label">Duurste</div><div class="val">{mo["max_p"]:.2f} c€</div><div class="sub">{mo["max_label"]}</div></div>
-    </div>
+    {kpi_blok(d)}
     <div class="chart-box">
-      <div class="legend">
-        <span><span class="dot" style="background:#1baf7a"></span>Goedkoop</span>
-        <span><span class="dot" style="background:#c3c2b7"></span>Normaal</span>
-        <span><span class="dot" style="background:#e34948"></span>Duur</span>
-        <span><span class="dot" style="background:#f59e0b"></span>Vast ~17.9 c€</span>
-      </div>
-      <div style="position:relative;height:180px"><canvas id="chart-mo"></canvas></div>
+      {legende(met_nu=bool(nu_badge))}
+      <div style="position:relative;height:180px"><canvas id="{chart_id}"></canvas></div>
     </div>
     <div class="tips">
-      <div class="tip-card goed"><h3>Beste kwartieren</h3>{tip_rijen(mo["top_goed"], "prijs-goed")}</div>
-      <div class="tip-card slecht"><h3>Duurste kwartieren</h3>{tip_rijen(mo["top_slecht"], "prijs-slecht")}</div>
+      <div class="tip-card goed"><h3>Beste kwartieren</h3>{tip_rijen(d["top_goed"], "prijs-goed")}</div>
+      <div class="tip-card slecht"><h3>Duurste kwartieren</h3>{tip_rijen(d["top_slecht"], "prijs-slecht")}</div>
     </div>
   </div>'''
 
 
-def morgen_chart_js(mo):
-    if not mo:
+def chart_js(d, chart_id):
+    if not d:
         return ""
-    labels = json.dumps(mo["labels"])
-    eind   = json.dumps(mo["eind"])
-    kleur  = json.dumps(mo["kleuren"])
-    return f"maakChart('chart-mo', {labels}, {eind}, {kleur});"
+    return f"maakChart('{chart_id}', {json.dumps(d['labels'])}, {json.dumps(d['eind'])}, {json.dumps(d['kleuren'])});"
 
 
 def genereer_html(vd, mo, vandaag_str, morgen_str, gegenereerd_op, huidig_kwartier):
     nu_badge = ""
-    if huidig_kwartier and huidig_kwartier in vd["labels"]:
-        idx = vd["labels"].index(huidig_kwartier)
-        prijs_nu = vd["eind"][idx]
+    if vd and huidig_kwartier in vd["labels"]:
+        prijs_nu = vd["eind"][vd["labels"].index(huidig_kwartier)]
         nu_badge = f'<div class="nu-badge">Nu ({huidig_kwartier}) &nbsp;{prijs_nu:.2f} c€/kWh</div>'
-
-    labels_vd = json.dumps(vd["labels"])
-    eind_vd   = json.dumps(vd["eind"])
-    kleur_vd  = json.dumps(vd["kleuren"])
 
     return f"""<!DOCTYPE html>
 <html lang="nl">
@@ -229,36 +277,12 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, gegenereerd_op, huidig_kwarti
   <div class="meta">Bijgewerkt op {gegenereerd_op}</div>
 </div>
 <div class="grid">
-  <div class="dag">
-    <div class="dag-header">
-      <div><div class="dag-titel">Vandaag</div><div class="dag-datum">{vandaag_str}</div></div>
-      {nu_badge}
-    </div>
-    <div class="kpis">
-      <div class="kpi goed"><div class="label">Goedkoopste</div><div class="val">{vd["min_p"]:.2f} c€</div><div class="sub">{vd["min_label"]}</div></div>
-      <div class="kpi"><div class="label">Gemiddelde</div><div class="val">{vd["gem"]:.2f} c€</div><div class="sub">incl. btw</div></div>
-      <div class="kpi slecht"><div class="label">Duurste</div><div class="val">{vd["max_p"]:.2f} c€</div><div class="sub">{vd["max_label"]}</div></div>
-    </div>
-    <div class="chart-box">
-      <div class="legend">
-        <span><span class="dot" style="background:#2a78d6"></span>Nu</span>
-        <span><span class="dot" style="background:#1baf7a"></span>Goedkoop</span>
-        <span><span class="dot" style="background:#c3c2b7"></span>Normaal</span>
-        <span><span class="dot" style="background:#e34948"></span>Duur</span>
-        <span><span class="dot" style="background:#f59e0b"></span>Vast ~17.9 c€</span>
-      </div>
-      <div style="position:relative;height:180px"><canvas id="chart-vd"></canvas></div>
-    </div>
-    <div class="tips">
-      <div class="tip-card goed"><h3>Beste kwartieren</h3>{tip_rijen(vd["top_goed"], "prijs-goed")}</div>
-      <div class="tip-card slecht"><h3>Duurste kwartieren</h3>{tip_rijen(vd["top_slecht"], "prijs-slecht")}</div>
-    </div>
-  </div>
-  {morgen_sectie(mo, morgen_str)}
+  {dag_sectie(vd, "Vandaag", vandaag_str, "chart-vd", nu_badge)}
+  {dag_sectie(mo, "Morgen", morgen_str, "chart-mo")}
 </div>
-<div class="footer">Indicatieve eindprijs = (1,04 × EPEX + 0,50) × 1,06 btw · Nettarieven niet inbegrepen · Bron: ENTSO-E</div>
+<div class="footer">Eindprijs = ({FACTOR:g} × EPEX + {OPSLAG:g}) × {BTW:g} btw · Nettarieven niet inbegrepen · Bron: ENTSO-E</div>
 <script>
-const REFERENTIE = 17.9;
+const REFERENTIE = {REFERENTIE};
 function maakChart(id, labels, data, kleuren) {{
   new Chart(document.getElementById(id), {{
     type: 'bar',
@@ -271,7 +295,10 @@ function maakChart(id, labels, data, kleuren) {{
     }},
     options: {{
       responsive: true, maintainAspectRatio: false,
-      plugins: {{ legend: {{ display: false }}, tooltip: {{ callbacks: {{ label: ctx => ctx.datasetIndex === 0 ? ctx.parsed.y.toFixed(2) + ' c€/kWh' : 'Vast tarief: 17.9 c€/kWh' }} }} }},
+      plugins: {{
+        legend: {{ display: false }},
+        tooltip: {{ callbacks: {{ label: ctx => ctx.datasetIndex === 0 ? ctx.parsed.y.toFixed(2) + ' c€/kWh' : 'Vast tarief: ' + REFERENTIE + ' c€/kWh' }} }}
+      }},
       scales: {{
         x: {{ ticks: {{ maxRotation: 0, maxTicksLimit: 12, color: '#898781', font: {{ size: 9 }} }}, grid: {{ display: false }} }},
         y: {{ ticks: {{ color: '#898781', font: {{ size: 10 }}, callback: v => v.toFixed(0) + ' c€' }}, grid: {{ color: '#e8e7e3' }} }}
@@ -279,39 +306,47 @@ function maakChart(id, labels, data, kleuren) {{
     }}
   }});
 }}
-maakChart('chart-vd', {labels_vd}, {eind_vd}, {kleur_vd});
-{morgen_chart_js(mo)}
+{chart_js(vd, "chart-vd")}
+{chart_js(mo, "chart-mo")}
 </script>
 </body>
 </html>"""
 
 
+# ---------------------- MAIN ----------------------
+
 def main():
     if not ENTSOE_TOKEN:
-        raise ValueError("ENTSOE_TOKEN niet gevonden in .env")
+        sys.exit("FOUT: ENTSOE_TOKEN niet gevonden (in .env of environment).")
 
-    nu     = datetime.now(CET)
+    nu     = datetime.now(BRUSSEL)
     morgen = nu + timedelta(days=1)
 
     kwartier_min    = (nu.minute // 15) * 15
     huidig_kwartier = nu.strftime(f"%H:{kwartier_min:02d}")
 
-    vandaag_str    = nu.strftime("%-d %B %Y")
-    morgen_str     = morgen.strftime("%-d %B %Y")
-    gegenereerd_op = nu.strftime("%d/%m/%Y om %H:%M")
-
-    print(f"Prijzen ophalen voor vandaag ({vandaag_str})...")
+    print(f"Prijzen ophalen voor vandaag ({nu:%d/%m})...")
     kw_vd = fetch_prices(nu)
-    print(f"{len(kw_vd)} datapunten ontvangen voor vandaag.")
+    print(f"  {len(kw_vd)} datapunten.")
 
-    print(f"Prijzen ophalen voor morgen ({morgen_str})...")
+    print(f"Prijzen ophalen voor morgen ({morgen:%d/%m})...")
     kw_mo = fetch_prices(morgen)
-    print(f"{len(kw_mo)} datapunten ontvangen voor morgen.")
+    print(f"  {len(kw_mo)} datapunten.")
 
-    vd = bouw_dag_data(kw_vd, huidig_kwartier=huidig_kwartier)
-    mo = bouw_dag_data(kw_mo) if kw_mo else {}
+    if not kw_vd and not kw_mo:
+        # Geen enkele data: laat de bestaande pagina staan en stop netjes
+        sys.exit("Geen data ontvangen — bestaande index.html blijft ongewijzigd.")
 
-    html = genereer_html(vd, mo, vandaag_str, morgen_str, gegenereerd_op, huidig_kwartier)
+    vd = bouw_dag_data(kw_vd, huidig_kwartier)
+    mo = bouw_dag_data(kw_mo)
+
+    html = genereer_html(
+        vd, mo,
+        nu.strftime("%-d %B %Y"),
+        morgen.strftime("%-d %B %Y"),
+        nu.strftime("%d/%m/%Y om %H:%M"),
+        huidig_kwartier,
+    )
     OUTPUT_PATH.write_text(html, encoding="utf-8")
     print(f"Dashboard klaar: {OUTPUT_PATH}")
 

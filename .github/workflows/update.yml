@@ -2,8 +2,12 @@ name: Update Stroomtip
 
 on:
   schedule:
-    - cron: '30 11 * * *'  # 13:30 Belgische tijd (UTC+2)
-  workflow_dispatch:  # ook manueel te starten
+    # UTC-tijden; België is UTC+2 in de zomer, UTC+1 in de winter.
+    # 3 runs per dag als vangnet: mislukt de eerste, dan vangt de volgende het op.
+    - cron: '30 11 * * *'   # 13:30 zomertijd / 12:30 wintertijd
+    - cron: '30 13 * * *'   # 15:30 zomertijd / 14:30 wintertijd
+    - cron: '30 16 * * *'   # 18:30 zomertijd / 17:30 wintertijd
+  workflow_dispatch:        # ook manueel te starten via de Actions-pagina
 
 jobs:
   update:
@@ -14,10 +18,10 @@ jobs:
       - name: Python instellen
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: '3.12'
 
       - name: Packages installeren
-        run: pip install requests python-dotenv
+        run: pip install requests
 
       - name: Dashboard genereren
         env:
