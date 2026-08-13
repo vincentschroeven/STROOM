@@ -184,10 +184,10 @@ def legende(met_nu: bool):
       </div>'''
 
 
-def dag_sectie(d, titel, datum_str, chart_id, nu_badge=""):
+def dag_sectie(d, titel, datum_str, datum_iso, chart_id, nu_badge=""):
     if not d:
         return f'''
-  <div class="dag">
+  <div class="dag" data-datum="{datum_iso}">
     <div class="dag-header">
       <div><div class="dag-titel">{titel}</div><div class="dag-datum">{datum_str}</div></div>
     </div>
@@ -195,7 +195,7 @@ def dag_sectie(d, titel, datum_str, chart_id, nu_badge=""):
   </div>'''
 
     return f'''
-  <div class="dag">
+  <div class="dag" data-datum="{datum_iso}">
     <div class="dag-header">
       <div><div class="dag-titel">{titel}</div><div class="dag-datum">{datum_str}</div></div>
       {nu_badge}
@@ -218,7 +218,7 @@ def chart_js(d, chart_id):
     return f"maakChart('{chart_id}', {json.dumps(d['labels'])}, {json.dumps(d['eind'])}, {json.dumps(d['kleuren'])});"
 
 
-def genereer_html(vd, mo, vandaag_str, morgen_str, gegenereerd_op, huidig_kwartier):
+def genereer_html(vd, mo, vandaag_str, morgen_str, vandaag_iso, morgen_iso, gegenereerd_op, huidig_kwartier):
     nu_badge = ""
     if vd and huidig_kwartier in vd["labels"]:
         prijs_nu = vd["eind"][vd["labels"].index(huidig_kwartier)]
@@ -277,8 +277,8 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, gegenereerd_op, huidig_kwarti
   <div class="meta">Bijgewerkt op {gegenereerd_op}</div>
 </div>
 <div class="grid">
-  {dag_sectie(vd, "Vandaag", vandaag_str, "chart-vd", nu_badge)}
-  {dag_sectie(mo, "Morgen", morgen_str, "chart-mo")}
+  {dag_sectie(vd, "Vandaag", vandaag_str, vandaag_iso, "chart-vd", nu_badge)}
+  {dag_sectie(mo, "Morgen", morgen_str, morgen_iso, "chart-mo")}
 </div>
 <div class="footer">Eindprijs = ({FACTOR:g} × EPEX + {OPSLAG:g}) × {BTW:g} btw · Nettarieven niet inbegrepen · Bron: ENTSO-E</div>
 <script>
@@ -308,6 +308,43 @@ function maakChart(id, labels, data, kleuren) {{
 }}
 {chart_js(vd, "chart-vd")}
 {chart_js(mo, "chart-mo")}
+
+(function() {{
+  const pad = n => String(n).padStart(2, '0');
+  const isoVan = dt => `${{dt.getFullYear()}}-${{pad(dt.getMonth() + 1)}}-${{pad(dt.getDate())}}`;
+
+  const vandaagISO = isoVan(new Date());
+  const morgenDt = new Date();
+  morgenDt.setDate(morgenDt.getDate() + 1);
+  const morgenISO = isoVan(morgenDt);
+
+  const grid = document.querySelector('.grid');
+  const secties = Array.from(grid.querySelectorAll('.dag'));
+  const zichtbaar = [];
+
+  secties.forEach(el => {{
+    const datum = el.dataset.datum;
+    if (datum < vandaagISO) {{
+      el.remove();
+      return;
+    }}
+    const titelEl = el.querySelector('.dag-titel');
+    if (datum === vandaagISO) titelEl.textContent = 'Vandaag';
+    else if (datum === morgenISO) titelEl.textContent = 'Morgen';
+    zichtbaar.push(el);
+  }});
+
+  zichtbaar.sort((a, b) => a.dataset.datum.localeCompare(b.dataset.datum));
+  zichtbaar.forEach(el => grid.appendChild(el));
+
+  if (!zichtbaar.some(el => el.dataset.datum === vandaagISO)) {{
+    const msg = document.createElement('div');
+    msg.className = 'geen-data';
+    msg.style.gridColumn = '1 / -1';
+    msg.textContent = 'Gegevens voor vandaag worden binnenkort bijgewerkt.';
+    grid.appendChild(msg);
+  }}
+}})();
 </script>
 </body>
 </html>"""
@@ -344,6 +381,8 @@ def main():
         vd, mo,
         nu.strftime("%-d %B %Y"),
         morgen.strftime("%-d %B %Y"),
+        nu.strftime("%Y-%m-%d"),
+        morgen.strftime("%Y-%m-%d"),
         nu.strftime("%d/%m/%Y om %H:%M"),
         huidig_kwartier,
     )
