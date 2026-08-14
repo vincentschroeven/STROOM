@@ -31,6 +31,7 @@ OPSLAG = 0.50     # vaste opslag in c€/kWh
 BTW    = 1.06     # 6% btw
 
 GRENS_GOEDKOOP = 8.0    # c€/kWh — hieronder kleurt een kwartier groen
+GRENS_MATIG    = 15.0   # c€/kWh — tussen GRENS_GOEDKOOP en dit kleurt een kwartier donkergroen
 GRENS_DUUR     = 17.9   # c€/kWh — hierboven kleurt een kwartier rood
 REFERENTIE     = 17.9   # c€/kWh — gele stippellijn (vast tarief)
 
@@ -136,6 +137,8 @@ def bouw_dag_data(kwartieren: list, huidig_kwartier: str = None) -> dict:
             kleuren.append('#2a78d6')      # nu
         elif eind[i] < GRENS_GOEDKOOP:
             kleuren.append('#1baf7a')      # goedkoop
+        elif eind[i] < GRENS_MATIG:
+            kleuren.append('#146c43')      # matig goedkoop
         elif eind[i] >= GRENS_DUUR:
             kleuren.append('#e34948')      # duur
         else:
@@ -178,6 +181,7 @@ def legende(met_nu: bool):
       <div class="legend">
         {nu}
         <span><span class="dot" style="background:#1baf7a"></span>&lt; {GRENS_GOEDKOOP:g} c€</span>
+        <span><span class="dot" style="background:#146c43"></span>{GRENS_GOEDKOOP:g}–{GRENS_MATIG:g} c€</span>
         <span><span class="dot" style="background:#c3c2b7"></span>Normaal</span>
         <span><span class="dot" style="background:#e34948"></span>&ge; {GRENS_DUUR:g} c€</span>
         <span><span class="dot" style="background:#f59e0b"></span>Vast ~{REFERENTIE:g} c€</span>
@@ -283,8 +287,12 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, vandaag_iso, morgen_iso, gege
 <div class="footer">Eindprijs = ({FACTOR:g} × EPEX + {OPSLAG:g}) × {BTW:g} btw · Nettarieven niet inbegrepen · Bron: ENTSO-E</div>
 <script>
 const REFERENTIE = {REFERENTIE};
+const GRENS_GOEDKOOP = {GRENS_GOEDKOOP};
+const GRENS_MATIG = {GRENS_MATIG};
+const GRENS_DUUR = {GRENS_DUUR};
+const CHARTS = {{}};
 function maakChart(id, labels, data, kleuren) {{
-  new Chart(document.getElementById(id), {{
+  CHARTS[id] = new Chart(document.getElementById(id), {{
     type: 'bar',
     data: {{
       labels,
@@ -312,11 +320,19 @@ function maakChart(id, labels, data, kleuren) {{
 (function() {{
   const pad = n => String(n).padStart(2, '0');
   const isoVan = dt => `${{dt.getFullYear()}}-${{pad(dt.getMonth() + 1)}}-${{pad(dt.getDate())}}`;
+  const kleurVoor = prijs => {{
+    if (prijs < GRENS_GOEDKOOP) return '#1baf7a';
+    if (prijs < GRENS_MATIG) return '#146c43';
+    if (prijs >= GRENS_DUUR) return '#e34948';
+    return '#c3c2b7';
+  }};
 
-  const vandaagISO = isoVan(new Date());
+  const nuDt = new Date();
+  const vandaagISO = isoVan(nuDt);
   const morgenDt = new Date();
   morgenDt.setDate(morgenDt.getDate() + 1);
   const morgenISO = isoVan(morgenDt);
+  const huidigKwartier = `${{pad(nuDt.getHours())}}:${{pad(Math.floor(nuDt.getMinutes() / 15) * 15)}}`;
 
   const grid = document.querySelector('.grid');
   const secties = Array.from(grid.querySelectorAll('.dag'));
@@ -331,6 +347,29 @@ function maakChart(id, labels, data, kleuren) {{
     const titelEl = el.querySelector('.dag-titel');
     if (datum === vandaagISO) titelEl.textContent = 'Vandaag';
     else if (datum === morgenISO) titelEl.textContent = 'Morgen';
+
+    const canvas = el.querySelector('canvas');
+    const chart = canvas && CHARTS[canvas.id];
+    if (chart) {{
+      const labels = chart.data.labels;
+      const data = chart.data.datasets[0].data;
+      const idx = datum === vandaagISO ? labels.indexOf(huidigKwartier) : -1;
+      chart.data.datasets[0].backgroundColor = data.map((prijs, i) => i === idx ? '#2a78d6' : kleurVoor(prijs));
+      chart.update('none');
+
+      let badge = el.querySelector('.nu-badge');
+      if (idx !== -1) {{
+        if (!badge) {{
+          badge = document.createElement('div');
+          badge.className = 'nu-badge';
+          el.querySelector('.dag-header').appendChild(badge);
+        }}
+        badge.innerHTML = `Nu (${{huidigKwartier}}) &nbsp;${{data[idx].toFixed(2)}} c€/kWh`;
+      }} else if (badge) {{
+        badge.remove();
+      }}
+    }}
+
     zichtbaar.push(el);
   }});
 
