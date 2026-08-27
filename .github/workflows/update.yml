@@ -4,9 +4,9 @@ on:
   schedule:
     # UTC-tijden; België is UTC+2 in de zomer, UTC+1 in de winter.
     # 3 runs per dag als vangnet: mislukt de eerste, dan vangt de volgende het op.
-    - cron: '30 11 * * *'   # 13:30 zomertijd / 12:30 wintertijd
-    - cron: '30 13 * * *'   # 15:30 zomertijd / 14:30 wintertijd
-    - cron: '30 16 * * *'   # 18:30 zomertijd / 17:30 wintertijd
+    - cron: '7 11 * * *'   # 13:30 zomertijd / 12:30 wintertijd
+    - cron: '7 13 * * *'   # 15:30 zomertijd / 14:30 wintertijd
+    - cron: '7 16 * * *'   # 18:30 zomertijd / 17:30 wintertijd
   workflow_dispatch:        # ook manueel te starten via de Actions-pagina
 
 jobs:
