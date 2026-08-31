@@ -2,11 +2,13 @@ name: Update Stroomtip
 
 on:
   schedule:
-  - cron: '7 12 * * *'   # 14:07 lokale tijd tijdens zomertijd
-  - cron: '7 13 * * *'   # 14:07 lokale tijd tijdens wintertijd
-  - cron: '7 14 * * *'   # 16:07 lokale tijd tijdens zomertijd
-  - cron: '7 15 * * *'   # 16:07 lokale tijd tijdens wintertijd
-  workflow_dispatch:        # ook manueel te starten via de Actions-pagina
+  - cron: '7 12 * * *'    # 14:07 lokale tijd tijdens zomertijd
+  - cron: '7 13 * * *'    # 14:07 lokale tijd tijdens wintertijd
+  - cron: '7 14 * * *'    # 16:07 lokale tijd tijdens zomertijd
+  - cron: '7 15 * * *'    # 16:07 lokale tijd tijdens wintertijd
+  - cron: '37 17 * * *'   # extra vangnet, later op de dag
+  - cron: '37 18 * * *'   # extra vangnet, later op de dag (wintertijd-equivalent)
+workflow_dispatch:        # ook manueel te starten via de Actions-pagina
 
 jobs:
   update:
