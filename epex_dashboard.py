@@ -65,7 +65,7 @@ def fetch_prices(date: datetime) -> list:
     laatste_fout = None
     for poging in range(1, RETRIES + 1):
         try:
-            resp = requests.get(API_URL, params=params, timeout=30)
+                        resp = requests.get(API_URL, params=params, timeout=45)
             if resp.status_code == 400:
                 # ENTSO-E geeft 400 als er (nog) geen data is voor die dag
                 return []
@@ -75,8 +75,8 @@ def fetch_prices(date: datetime) -> list:
             laatste_fout = e
             print(f"  Poging {poging}/{RETRIES} mislukt: {e}")
             if poging < RETRIES:
-                time.sleep(10)
-
+                      time.sleep(15 * poging)
+                
     raise RuntimeError(f"ENTSO-E niet bereikbaar na {RETRIES} pogingen: {laatste_fout}")
 
 
