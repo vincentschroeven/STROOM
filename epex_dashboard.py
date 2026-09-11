@@ -30,10 +30,10 @@ FACTOR = 1.04     # vermenigvuldiger op EPEX
 OPSLAG = 0.50     # vaste opslag in c€/kWh
 BTW    = 1.06     # 6% btw
 
-GRENS_GOEDKOOP = 8.0    # c€/kWh — hieronder kleurt een kwartier groen
-GRENS_MATIG    = 15.0   # c€/kWh — tussen GRENS_GOEDKOOP en dit kleurt een kwartier donkergroen
-GRENS_DUUR     = 17.9   # c€/kWh — hierboven kleurt een kwartier rood
-REFERENTIE     = 17.9   # c€/kWh — gele stippellijn (vast tarief)
+GRENS_GOEDKOOP = 12.0   # c€/kWh — hieronder kleurt een kwartier groen
+GRENS_MATIG    = 22.5   # c€/kWh — tussen GRENS_GOEDKOOP en dit kleurt een kwartier donkergroen
+GRENS_DUUR     = 27.0   # c€/kWh — hierboven kleurt een kwartier rood
+REFERENTIE     = 27.0   # c€/kWh — gele stippellijn (vast tarief)
 
 AANTAL_TIPS = 5         # aantal beste/duurste kwartieren in de lijstjes
 RETRIES     = 3         # pogingen bij API-fouten
