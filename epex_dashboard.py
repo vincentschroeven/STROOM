@@ -42,6 +42,7 @@ TOESTELLEN = [
     {"naam": "Droogkast",     "icoon": "🌀", "kwh": 3.0, "duur": 120, "max_wacht": 12},
     {"naam": "Afwasmachine",  "icoon": "🍽️", "kwh": 1.0, "duur": 150, "max_wacht": 12},
     {"naam": "Wasmachine",    "icoon": "👕", "kwh": 0.7, "duur": 120, "max_wacht": 12},
+    {"naam": "Strijkijzer",   "icoon": "👔", "kwh": 1.0, "duur": 60,  "max_wacht": 12},
     {"naam": "Droogoven",     "icoon": "🍄", "kwh": 2.4, "duur": 240, "max_wacht": 24},
 ]
 GEWOON_DOEN = ["Waterkoker", "Airfryer", "Koken & oven voor het eten"]
@@ -268,12 +269,20 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, vandaag_iso, morgen_iso, gege
 <html lang="nl">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Stroomtip</title>
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="theme-color" content="#f5f4f0">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Stroomtip">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
 <style>
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
-  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f4f0; color: #0b0b0b; padding: 1.25rem; max-width: 960px; margin: 0 auto; line-height: 1.5; }}
+  body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f4f0; color: #0b0b0b; padding: max(1.25rem, env(safe-area-inset-top)) 1.25rem max(1.25rem, env(safe-area-inset-bottom)); max-width: 960px; margin: 0 auto; line-height: 1.5; }}
   .top-header {{ display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.25rem; }}
   .top-header h1 {{ font-size: 18px; font-weight: 500; }}
   .top-header .meta {{ font-size: 11px; color: #898781; text-align: right; }}
@@ -551,6 +560,16 @@ function maakChart(id, labels, data, kleuren) {{
     grid.appendChild(msg);
   }}
 }})();
+</script>
+<script>
+  if ('serviceWorker' in navigator) {{
+    navigator.serviceWorker.register('sw.js').catch(() => {{}});
+  }}
+  // Als de app na een tijdje terug geopend wordt: vers laden, zodat advies en prijzen kloppen.
+  const GELADEN = Date.now();
+  document.addEventListener('visibilitychange', () => {{
+    if (document.visibilityState === 'visible' && Date.now() - GELADEN > 10 * 60 * 1000) location.reload();
+  }});
 </script>
 </body>
 </html>"""
