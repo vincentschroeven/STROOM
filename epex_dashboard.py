@@ -33,7 +33,20 @@ BTW    = 1.06     # 6% btw
 GRENS_GOEDKOOP = 12.0   # c€/kWh — hieronder kleurt een kwartier groen
 GRENS_MATIG    = 22.5   # c€/kWh — tussen GRENS_GOEDKOOP en dit kleurt een kwartier donkergroen
 GRENS_DUUR     = 27.0   # c€/kWh — hierboven kleurt een kwartier rood
-REFERENTIE     = 27.0   # c€/kWh — gele stippellijn (vast tarief)
+REFERENTIE     = 21.3   # c€/kWh — gele stippellijn: gemiddeld vast contract (Test-Aankoop, okt 2026, energie incl. btw)
+REFERENTIE_LABEL = "Gem. vast contract"
+
+# ---- Gezinsblok: toestellen die kunnen wachten ----
+# kwh = verbruik per beurt, duur = minuten, max_wacht = hoe lang wachten nog aangenaam is (uren)
+TOESTELLEN = [
+    {"naam": "Droogkast",     "icoon": "🌀", "kwh": 3.0, "duur": 120, "max_wacht": 12},
+    {"naam": "Afwasmachine",  "icoon": "🍽️", "kwh": 1.0, "duur": 150, "max_wacht": 12},
+    {"naam": "Wasmachine",    "icoon": "👕", "kwh": 0.7, "duur": 120, "max_wacht": 12},
+    {"naam": "Droogoven",     "icoon": "🍄", "kwh": 2.4, "duur": 240, "max_wacht": 24},
+]
+GEWOON_DOEN = ["Waterkoker", "Airfryer", "Koken & oven voor het eten"]
+WACHT_DREMPEL = 0.10    # € — pas vanaf deze besparing per beurt zeggen we "wacht"
+VENSTER_UUR   = 2       # lengte van het "beste moment"-blok in uren
 
 AANTAL_TIPS = 5         # aantal beste/duurste kwartieren in de lijstjes
 RETRIES     = 3         # pogingen bij API-fouten
@@ -184,7 +197,7 @@ def legende(met_nu: bool):
         <span><span class="dot" style="background:#146c43"></span>{GRENS_GOEDKOOP:g}–{GRENS_MATIG:g} c€</span>
         <span><span class="dot" style="background:#c3c2b7"></span>Normaal</span>
         <span><span class="dot" style="background:#e34948"></span>&ge; {GRENS_DUUR:g} c€</span>
-        <span><span class="dot" style="background:#f59e0b"></span>Vast ~{REFERENTIE:g} c€</span>
+        <span><span class="dot" style="background:#f59e0b"></span>{REFERENTIE_LABEL} ~{REFERENTIE:g} c€</span>
       </div>'''
 
 
@@ -219,10 +232,33 @@ def dag_sectie(d, titel, datum_str, datum_iso, chart_id, nu_badge=""):
 def chart_js(d, chart_id):
     if not d:
         return ""
-    return f"maakChart('{chart_id}', {json.dumps(d['labels'])}, {json.dumps(d['eind'])}, {json.dumps(d['kleuren'])});"
+    return f"try {{ maakChart('{chart_id}', {json.dumps(d['labels'])}, {json.dumps(d['eind'])}, {json.dumps(d['kleuren'])}); }} catch (e) {{ console.warn(e); }}"
+
+
+def gezin_html():
+    gewoon = "".join(f"<span>{g}</span>" for g in GEWOON_DOEN)
+    return f'''
+<div class="gezin">
+  <div class="kaart" id="gezin-status"></div>
+  <div class="kaart">
+    <h2>Wat doe ik met…</h2>
+    <div id="gezin-toestellen"></div>
+    <div class="subtitel">Gewoon doen, nooit wachten</div>
+    <div class="gewoon">{gewoon}</div>
+    <div class="regels">
+      <div class="regel"><b>Niet tegelijk:</b> start zware toestellen een kwartier na elkaar.</div>
+      <div class="regel"><b>Infrarood:</b> alleen aan waar je zit. Uitstellen helpt niet, uitzetten wel.</div>
+    </div>
+  </div>
+</div>'''
 
 
 def genereer_html(vd, mo, vandaag_str, morgen_str, vandaag_iso, morgen_iso, gegenereerd_op, huidig_kwartier):
+    dag_data = []
+    if vd:
+        dag_data.append({"datum": vandaag_iso, "labels": vd["labels"], "eind": vd["eind"]})
+    if mo:
+        dag_data.append({"datum": morgen_iso, "labels": mo["labels"], "eind": mo["eind"]})
     nu_badge = ""
     if vd and huidig_kwartier in vd["labels"]:
         prijs_nu = vd["eind"][vd["labels"].index(huidig_kwartier)]
@@ -273,6 +309,40 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, vandaag_iso, morgen_iso, gege
   .prijs-slecht {{ font-weight: 500; color: #a32d2d; }}
   .footer {{ font-size: 10px; color: #898781; text-align: center; margin-top: 1rem; }}
   .geen-data {{ color: #898781; font-size: 13px; padding: 2rem 0; text-align: center; }}
+
+  /* ---- gezinsblok ---- */
+  .gezin {{ display: grid; grid-template-columns: 1fr 1fr; gap: 1.25rem; margin-bottom: 1.25rem; }}
+  @media (max-width: 640px) {{ .gezin {{ grid-template-columns: 1fr; }} }}
+  .kaart {{ background: #fff; border-radius: 12px; padding: 1.25rem; border: 0.5px solid rgba(11,11,11,0.10); }}
+  .status {{ display: flex; gap: 14px; align-items: center; }}
+  .lamp {{ width: 52px; height: 52px; border-radius: 50%; flex-shrink: 0; background: #c3c2b7; box-shadow: 0 0 0 6px rgba(195,194,183,0.25); }}
+  .status.goedkoop .lamp {{ background: #1baf7a; box-shadow: 0 0 0 6px rgba(27,175,122,0.18); }}
+  .status.normaal .lamp {{ background: #f59e0b; box-shadow: 0 0 0 6px rgba(245,158,11,0.18); }}
+  .status.duur .lamp {{ background: #e34948; box-shadow: 0 0 0 6px rgba(227,73,72,0.18); }}
+  .status-titel {{ font-size: 22px; font-weight: 600; line-height: 1.2; }}
+  .status-sub {{ font-size: 13px; color: #52514e; margin-top: 4px; }}
+  .venster {{ margin-top: 1.1rem; background: #eaf3de; border-radius: 10px; padding: 0.8rem 1rem; }}
+  .venster .label {{ font-size: 11px; color: #3b6d11; font-weight: 500; text-transform: uppercase; letter-spacing: .04em; }}
+  .venster .tijd {{ font-size: 20px; font-weight: 600; color: #1d4a06; margin-top: 2px; }}
+  .venster .sub {{ font-size: 12px; color: #3b6d11; }}
+  .kaart h2 {{ font-size: 15px; font-weight: 600; margin-bottom: 0.75rem; }}
+  .toestel {{ display: flex; align-items: center; gap: 12px; padding: 10px 0; border-bottom: 0.5px solid rgba(0,0,0,0.08); }}
+  .toestel:last-of-type {{ border-bottom: none; }}
+  .toestel .ico {{ font-size: 22px; width: 32px; text-align: center; }}
+  .toestel .naam {{ font-size: 14px; font-weight: 500; }}
+  .toestel .uitleg {{ font-size: 12px; color: #52514e; }}
+  .toestel .wat {{ margin-left: auto; text-align: right; flex-shrink: 0; }}
+  .chip {{ display: inline-block; font-size: 12px; font-weight: 600; padding: 4px 10px; border-radius: 999px; white-space: nowrap; }}
+  .chip.wacht {{ background: #eaf3de; color: #1d4a06; }}
+  .chip.start {{ background: #f0efea; color: #52514e; }}
+  .chip.nu {{ background: #e6f1fb; color: #185fa5; }}
+  .gewoon {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }}
+  .gewoon span {{ font-size: 12px; background: #f0efea; border-radius: 999px; padding: 4px 10px; }}
+  .regels {{ margin-top: 1rem; display: grid; gap: 8px; }}
+  .regel {{ font-size: 12px; color: #52514e; background: #f5f4f0; border-radius: 8px; padding: 8px 10px; }}
+  .regel b {{ color: #0b0b0b; font-weight: 600; }}
+  .subtitel {{ font-size: 13px; font-weight: 600; margin: 1rem 0 0.25rem; color: #52514e; }}
+  .details-kop {{ font-size: 13px; font-weight: 600; color: #52514e; margin: 0.5rem 0 0.75rem; }}
 </style>
 </head>
 <body>
@@ -280,6 +350,8 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, vandaag_iso, morgen_iso, gege
   <h1>⚡ Stroomtip</h1>
   <div class="meta">Bijgewerkt op {gegenereerd_op}</div>
 </div>
+{gezin_html()}
+<div class="details-kop">Prijzen per kwartier</div>
 <div class="grid">
   {dag_sectie(vd, "Vandaag", vandaag_str, vandaag_iso, "chart-vd", nu_badge)}
   {dag_sectie(mo, "Morgen", morgen_str, morgen_iso, "chart-mo")}
@@ -291,6 +363,10 @@ const GRENS_GOEDKOOP = {GRENS_GOEDKOOP};
 const GRENS_MATIG = {GRENS_MATIG};
 const GRENS_DUUR = {GRENS_DUUR};
 const CHARTS = {{}};
+const DATA = {json.dumps(dag_data)};
+const TOESTELLEN = {json.dumps(TOESTELLEN, ensure_ascii=False)};
+const WACHT_DREMPEL = {WACHT_DREMPEL};
+const VENSTER_UUR = {VENSTER_UUR};
 function maakChart(id, labels, data, kleuren) {{
   CHARTS[id] = new Chart(document.getElementById(id), {{
     type: 'bar',
@@ -305,7 +381,7 @@ function maakChart(id, labels, data, kleuren) {{
       responsive: true, maintainAspectRatio: false,
       plugins: {{
         legend: {{ display: false }},
-        tooltip: {{ callbacks: {{ label: ctx => ctx.datasetIndex === 0 ? ctx.parsed.y.toFixed(2) + ' c€/kWh' : 'Vast tarief: ' + REFERENTIE + ' c€/kWh' }} }}
+        tooltip: {{ callbacks: {{ label: ctx => ctx.datasetIndex === 0 ? ctx.parsed.y.toFixed(2) + ' c€/kWh' : '{REFERENTIE_LABEL}: ' + REFERENTIE + ' c€/kWh' }} }}
       }},
       scales: {{
         x: {{ ticks: {{ maxRotation: 0, maxTicksLimit: 12, color: '#898781', font: {{ size: 9 }} }}, grid: {{ display: false }} }},
@@ -375,6 +451,97 @@ function maakChart(id, labels, data, kleuren) {{
 
   zichtbaar.sort((a, b) => a.dataset.datum.localeCompare(b.dataset.datum));
   zichtbaar.forEach(el => grid.appendChild(el));
+
+  // ---------- gezinsblok ----------
+  const euro = v => '€' + v.toFixed(2).replace('.', ',');
+  const cent = v => v.toFixed(1).replace('.', ',') + ' c€';
+  const dagWoord = iso => iso === vandaagISO ? 'vandaag' : (iso === morgenISO ? 'morgen' : iso);
+
+  // reeks vanaf het huidige kwartier: vandaag (rest) + morgen
+  const reeks = [];
+  const vd = DATA.find(d => d.datum === vandaagISO);
+  const mo = DATA.find(d => d.datum === morgenISO);
+  if (vd) vd.labels.forEach((l, i) => {{ if (l >= huidigKwartier) reeks.push({{ dag: vd.datum, label: l, prijs: vd.eind[i] }}); }});
+  if (mo) mo.labels.forEach((l, i) => reeks.push({{ dag: mo.datum, label: l, prijs: mo.eind[i] }}));
+
+  const eindLabel = (r, n) => {{
+    const [h, m] = r.label.split(':').map(Number);
+    const t = h * 60 + m + n * 15;
+    return `${{pad(Math.floor(t / 60) % 24)}}:${{pad(t % 60)}}`;
+  }};
+
+  // beste aaneengesloten blok binnen de komende 'maxQ' kwartieren
+  const besteStart = (n, maxQ) => {{
+    let best = null;
+    for (let s = 0; s + n <= reeks.length && s <= maxQ; s++) {{
+      let som = 0;
+      for (let j = s; j < s + n; j++) som += reeks[j].prijs;
+      const gem = som / n;
+      if (!best || gem < best.gem - 1e-9) best = {{ s, gem }};
+    }}
+    return best;
+  }};
+
+  const statusEl = document.getElementById('gezin-status');
+  const toestelEl = document.getElementById('gezin-toestellen');
+  if (vd && reeks.length && reeks[0].dag === vandaagISO) {{
+    const nuPrijs = reeks[0].prijs;
+    const gesorteerd = [...vd.eind].sort((a, b) => a - b);
+    const rang = gesorteerd.filter(p => p < nuPrijs).length / gesorteerd.length;
+    const stand = rang < 1/3 ? 'goedkoop' : (rang >= 2/3 ? 'duur' : 'normaal');
+    const titels = {{ goedkoop: 'Nu is stroom goedkoop', normaal: 'Nu is stroom gewoon', duur: 'Nu is stroom duur' }};
+    const subs = {{ goedkoop: 'Goed moment voor de zware toestellen.', normaal: 'Kan, maar straks is het goedkoper.', duur: 'Zware toestellen beter even laten wachten.' }};
+
+    const venQ = VENSTER_UUR * 4;
+    const ven = besteStart(Math.min(venQ, reeks.length), 96);
+    let venHtml = '';
+    if (ven) {{
+      const r = reeks[ven.s];
+      const nuTekst = ven.s === 0 ? 'nu' : `${{dagWoord(r.dag)}} ${{r.label}}`;
+      venHtml = `<div class="venster"><div class="label">Beste moment</div>
+        <div class="tijd">${{ven.s === 0 ? 'Nu' : dagWoord(r.dag).replace(/^./, c => c.toUpperCase()) + ' ' + r.label}} – ${{eindLabel(r, venQ)}}</div>
+        <div class="sub">gemiddeld ${{cent(ven.gem)}}/kWh</div></div>`;
+    }}
+
+    const wachters = [];
+    toestelEl.innerHTML = TOESTELLEN.map(t => {{
+      const n = Math.max(1, Math.round(t.duur / 15));
+      if (reeks.length < n) return '';
+      let som = 0;
+      for (let j = 0; j < n; j++) som += reeks[j].prijs;
+      const kostNu = t.kwh * (som / n) / 100;
+      const b = besteStart(n, t.max_wacht * 4);
+      const kostBest = t.kwh * b.gem / 100;
+      const winst = kostNu - kostBest;
+      let wat, uitleg;
+      if (b.s === 0) {{
+        wat = `<span class="chip nu">Start nu</span>`;
+        uitleg = `Nu is het goedkoopst · ${{euro(kostNu)}} per beurt`;
+      }} else if (winst >= WACHT_DREMPEL) {{
+        wachters.push(t.naam.toLowerCase());
+        const r = reeks[b.s];
+        wat = `<span class="chip wacht">Wacht tot ${{r.dag === vandaagISO ? '' : 'morgen '}}${{r.label}}</span>`;
+        uitleg = `Nu ${{euro(kostNu)}} → dan ${{euro(kostBest)}} · bespaart ${{euro(winst)}}`;
+      }} else {{
+        wat = `<span class="chip start">Start maar</span>`;
+        uitleg = `Wachten scheelt maar ${{euro(Math.max(winst, 0))}}`;
+      }}
+      return `<div class="toestel"><div class="ico">${{t.icoon}}</div>
+        <div><div class="naam">${{t.naam}}</div><div class="uitleg">${{uitleg}}</div></div>
+        <div class="wat">${{wat}}</div></div>`;
+    }}).join('');
+    const lijst = wachters.length > 1 ? wachters.slice(0, -1).join(', ') + ' en ' + wachters.at(-1) : wachters[0];
+    const advies = wachters.length
+      ? `Laat de ${{lijst}} even wachten.`
+      : (stand === 'goedkoop' ? subs.goedkoop : 'Wachten levert nu nergens echt iets op.');
+    statusEl.innerHTML = `<div class="status ${{stand}}"><div class="lamp"></div>
+      <div><div class="status-titel">${{titels[stand]}}</div>
+      <div class="status-sub">${{cent(nuPrijs)}}/kWh · ${{advies}}</div></div></div>${{venHtml}}`;
+
+
+  }} else {{
+    document.querySelector('.gezin').style.display = 'none';
+  }}
 
   if (!zichtbaar.some(el => el.dataset.datum === vandaagISO)) {{
     const msg = document.createElement('div');
