@@ -242,12 +242,15 @@ def gezin_html():
 <div class="gezin">
   <div class="kaart" id="gezin-status"></div>
   <div class="kaart">
+    <div class="tegelijk">
+      <div class="tegelijk-ico">⚡</div>
+      <div><b>Zet niet te veel tegelijk op.</b> Eén grote warmmaker tegelijk: oven, airfryer, wafelijzer, croque-ijzer, droogkast, was of afwas. Waterkoker of koffie mag er altijd bij.</div>
+    </div>
     <h2>Wat doe ik met…</h2>
     <div id="gezin-toestellen"></div>
     <div class="subtitel">Gewoon doen, nooit wachten</div>
     <div class="gewoon">{gewoon}</div>
     <div class="regels">
-      <div class="regel"><b>Niet tegelijk:</b> start zware toestellen een kwartier na elkaar.</div>
       <div class="regel"><b>Infrarood:</b> alleen aan waar je zit. Uitstellen helpt niet, uitzetten wel.</div>
     </div>
   </div>
@@ -348,6 +351,9 @@ def genereer_html(vd, mo, vandaag_str, morgen_str, vandaag_iso, morgen_iso, gege
   .gewoon {{ display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }}
   .gewoon span {{ font-size: 12px; background: #f0efea; border-radius: 999px; padding: 4px 10px; }}
   .regels {{ margin-top: 1rem; display: grid; gap: 8px; }}
+  .tegelijk {{ display: flex; gap: 10px; align-items: flex-start; background: #fff4e0; border: 1px solid #f5c66b; border-radius: 10px; padding: 10px 12px; margin-bottom: 1rem; font-size: 13px; color: #5c3d00; line-height: 1.45; }}
+  .tegelijk b {{ color: #3d2800; }}
+  .tegelijk-ico {{ font-size: 18px; line-height: 1.2; }}
   .regel {{ font-size: 12px; color: #52514e; background: #f5f4f0; border-radius: 8px; padding: 8px 10px; }}
   .regel b {{ color: #0b0b0b; font-weight: 600; }}
   .subtitel {{ font-size: 13px; font-weight: 600; margin: 1rem 0 0.25rem; color: #52514e; }}
